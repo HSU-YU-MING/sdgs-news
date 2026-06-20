@@ -5,6 +5,13 @@ import './globals.css';
 import { loadKey, saveKey, clearKey, touchKey, getKeyInfo, INACTIVITY_DAYS } from '../lib/keyStore.js';
 import { keywordMatch } from '../lib/sdgs.js';
 import { classifyWithGemini } from '../lib/geminiClient.js';
+import { classifyLocalSemantic } from '../lib/localSemantic.js';
+
+const ENGINES = {
+  auto: { label: '⚡ 自動', needKey: false },
+  gemini: { label: '☁️ Gemini', needKey: true },
+  semantic: { label: '🧠 本地語意', needKey: false },
+};
 
 export default function Home() {
   const [mode, setMode] = useState('text'); // 'text' | 'url'
@@ -13,6 +20,10 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+
+  // 引擎選擇:auto / gemini / semantic / llm(預設自動)
+  const [engine, setEngine] = useState('auto');
+  const [progress, setProgress] = useState(null); // { percent, text }
 
   // API 金鑰相關狀態
   const [apiKey, setApiKey] = useState('');
@@ -24,19 +35,23 @@ export default function Home() {
     const k = loadKey();
     setApiKey(k);
     setKeyReady(true);
-    if (!k) setShowSettings(true); // 沒金鑰就先打開設定
   }, []);
 
   const hasKey = apiKey.trim().length > 0;
 
   async function analyze() {
-    if (!hasKey) {
+    // 「自動」:有金鑰用 Gemini,否則用本地語意(本地 LLM 因需 1GB 下載,不自動觸發)
+    const effective = engine === 'auto' ? (hasKey ? 'gemini' : 'semantic') : engine;
+
+    // 只有明確選 Gemini 卻沒金鑰時才擋下(自動模式不會走到這)
+    if (effective === 'gemini' && !hasKey) {
       setShowSettings(true);
-      setError('請先設定你的 Gemini API 金鑰');
+      setError('Gemini 模式需要金鑰。你也可以改用「自動」「本地語意」或「本地 LLM」,無需金鑰。');
       return;
     }
     setError('');
     setData(null);
+    setProgress(null);
     setLoading(true);
     try {
       // 1. 取得要分析的文字(貼網址時透過 /api/fetch 代抓)
@@ -66,30 +81,38 @@ export default function Home() {
         return;
       }
 
-      // 2. 關鍵字快篩(瀏覽器端)
+      // 2. 關鍵字命中(供結果標籤參考,各模式共用)
       const keyword = keywordMatch(content)
         .filter((k) => k.hits > 0)
         .sort((a, b) => b.hits - a.hits);
 
-      // 3. Gemini 精修(瀏覽器直接打給 Google,用使用者自己的金鑰)
+      // 3. 依所選引擎判斷
       let ai = [];
       let aiError = null;
       let usedAI = false;
       let usedModel = null;
       try {
-        const out = await classifyWithGemini(content, apiKey);
-        ai = out.results;
-        usedModel = out.model;
+        if (effective === 'gemini') {
+          const out = await classifyWithGemini(content, apiKey);
+          ai = out.results;
+          usedModel = out.model;
+          touchKey();
+        } else if (effective === 'semantic') {
+          setProgress({ percent: 0, text: '載入語意模型中…' });
+          const out = await classifyLocalSemantic(content, (percent) =>
+            setProgress({ percent, text: '載入語意模型中…' })
+          );
+          ai = out.results;
+          usedModel = out.model;
+        }
         usedAI = true;
-        touchKey(); // 成功用過,重置 30 天倒數
       } catch (e) {
-        aiError =
-          e.message === 'NO_API_KEY'
-            ? '尚未設定 Gemini API 金鑰,目前僅顯示關鍵字快篩結果。'
-            : e.message;
+        aiError = e.message;
+      } finally {
+        setProgress(null);
       }
 
-      // 4. 組合結果(AI 為主,無 AI 時用關鍵字)
+      // 4. 組合結果(AI 為主,失敗時退回關鍵字)
       let results;
       if (usedAI && ai.length > 0) {
         results = ai.map((r) => {
@@ -107,13 +130,15 @@ export default function Home() {
           reason: `命中關鍵字:${k.matched.join('、')}`,
           matched: k.matched,
         }));
+        if (!usedAI && !aiError) aiError = '此模式未產生結果,改顯示關鍵字快篩。';
       }
 
-      setData({ results, usedAI, usedModel, aiError, sourceTitle });
+      setData({ results, usedAI, usedModel, aiError, sourceTitle, engine: effective, auto: engine === 'auto' });
     } catch (e) {
       setError('發生問題:' + e.message);
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   }
 
@@ -126,6 +151,20 @@ export default function Home() {
           {hasKey ? '🔑 API 金鑰 ✓' : '🔑 設定 API 金鑰'}
         </button>
       </div>
+
+      <div className="engine-row">
+        {Object.entries(ENGINES).map(([key, e]) => (
+          <button
+            key={key}
+            className={'engine-btn' + (engine === key ? ' active' : '')}
+            onClick={() => setEngine(key)}
+            disabled={loading}
+          >
+            {e.label}
+          </button>
+        ))}
+      </div>
+      <div className="engine-hint">{engineHint(engine)}</div>
 
       <div className="header">
         <h1>
@@ -188,17 +227,37 @@ export default function Home() {
           {loading ? '分析中…' : '開始分析'}
         </button>
 
+        {loading && progress ? (
+          <div className="progress">
+            <div className="progress-text">
+              {progress.text}
+              {typeof progress.percent === 'number' ? ` ${progress.percent}%` : ''}
+            </div>
+            <div className="progress-bar">
+              <span style={{ width: (progress.percent || 0) + '%' }} />
+            </div>
+          </div>
+        ) : null}
+
         {error ? <div className="error">{error}</div> : null}
       </div>
 
       {data ? <Results data={data} /> : null}
 
       <div className="footer">
-        關鍵字快篩 + Gemini AI 判斷 · 共 17 項 SDGs<br />
+        三種判斷模式:Gemini 雲端 / 本地語意 / 本地 LLM · 共 17 項 SDGs<br />
         你的 API 金鑰只儲存在這台裝置的瀏覽器,不會上傳保存;超過 {INACTIVITY_DAYS} 天未使用會自動清除。
       </div>
     </div>
   );
+}
+
+function engineHint(engine) {
+  if (engine === 'auto')
+    return '⚡ 自動挑選:有設定 Gemini 金鑰就用 Gemini(最準),否則用本地語意(免金鑰)。';
+  if (engine === 'gemini')
+    return '☁️ 用你的 Gemini 金鑰雲端判斷,最準確、附判斷理由。';
+  return '🧠 在你的瀏覽器用語意模型判斷,免金鑰。首次使用會下載模型(約 120MB,之後快取),只給相關度、無理由。';
 }
 
 function ApiKeyPanel({ apiKey, onSave, onClear, onClose }) {
@@ -265,8 +324,13 @@ function ApiKeyPanel({ apiKey, onSave, onClear, onClose }) {
   );
 }
 
+const ENGINE_BADGE = {
+  gemini: '☁️ Gemini 雲端',
+  semantic: '🧠 本地語意',
+};
+
 function Results({ data }) {
-  const { results, usedAI, usedModel, aiError, sourceTitle } = data;
+  const { results, usedAI, usedModel, aiError, sourceTitle, engine, auto } = data;
 
   return (
     <div className="results">
@@ -274,10 +338,11 @@ function Results({ data }) {
         <h2>分析結果</h2>
         {usedAI ? (
           <span className="badge-ai" title={'使用模型:' + usedModel}>
-            ✦ Gemini 判斷中{usedModel ? `(${usedModel})` : ''}
+            ✦ {auto ? '⚡自動 → ' : ''}
+            {ENGINE_BADGE[engine] || 'AI'} 判斷{usedModel ? `(${usedModel})` : ''}
           </span>
         ) : (
-          <span className="badge-kw">關鍵字快篩(Gemini 未生效)</span>
+          <span className="badge-kw">關鍵字快篩(AI 未生效)</span>
         )}
       </div>
 
