@@ -1,0 +1,20 @@
+{
+  "name": "sdgs-news-classifier",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "preview": "next build && wrangler pages dev out --compatibility-date 2024-09-01",
+    "deploy": "next build && wrangler pages deploy out --commit-dirty=true",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.102.0"
+  }
+}
