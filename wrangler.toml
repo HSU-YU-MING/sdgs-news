@@ -1,0 +1,13 @@
+name = "sdgs-news"
+compatibility_date = "2024-09-01"
+pages_build_output_dir = "out"
+
+# Cloudflare Workers AI 綁定:讓 functions 能用 env.AI 呼叫內建模型(bge-m3 向量)。
+# 免費額度每天 10,000 Neurons;用完會回傳錯誤,前端自動改用瀏覽器本機模型,不會產生費用。
+[ai]
+binding = "AI"
+
+# KV 儲存:存「每日呼叫次數」計數器,用來實作硬性每日上限(即使綁卡也不會超出免費額度)。
+[[kv_namespaces]]
+binding = "USAGE_KV"
+id = "de807b1fb30b4856a2f510b5f6d7d8c7"

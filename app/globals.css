@@ -47,6 +47,23 @@ body {
   border-color: var(--accent);
 }
 
+.engine-toggle {
+  margin-bottom: 12px;
+}
+
+.engine-toggle-btn {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.engine-toggle-btn strong {
+  color: var(--text);
+}
+
 .engine-row {
   display: flex;
   gap: 8px;

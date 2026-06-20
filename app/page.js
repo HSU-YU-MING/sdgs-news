@@ -5,12 +5,12 @@ import './globals.css';
 import { loadKey, saveKey, clearKey, touchKey, getKeyInfo, INACTIVITY_DAYS } from '../lib/keyStore.js';
 import { keywordMatch } from '../lib/sdgs.js';
 import { classifyWithGemini } from '../lib/geminiClient.js';
-import { classifyLocalSemantic } from '../lib/localSemantic.js';
+import { classifySemantic } from '../lib/localSemantic.js';
 
 const ENGINES = {
   auto: { label: '⚡ 自動', needKey: false },
   gemini: { label: '☁️ Gemini', needKey: true },
-  semantic: { label: '🧠 本地語意', needKey: false },
+  semantic: { label: '🧠 語意(免金鑰)', needKey: false },
 };
 
 export default function Home() {
@@ -21,8 +21,9 @@ export default function Home() {
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
 
-  // 引擎選擇:auto / gemini / semantic / llm(預設自動)
+  // 引擎選擇:auto / gemini / semantic(預設自動)
   const [engine, setEngine] = useState('auto');
+  const [showEngines, setShowEngines] = useState(false); // 進階:是否展開手動切換
   const [progress, setProgress] = useState(null); // { percent, text }
 
   // API 金鑰相關狀態
@@ -98,12 +99,11 @@ export default function Home() {
           usedModel = out.model;
           touchKey();
         } else if (effective === 'semantic') {
-          setProgress({ percent: 0, text: '載入語意模型中…' });
-          const out = await classifyLocalSemantic(content, (percent) =>
-            setProgress({ percent, text: '載入語意模型中…' })
-          );
+          setProgress({ percent: null, text: '語意分析中…' });
+          const out = await classifySemantic(content, (p) => setProgress(p));
           ai = out.results;
           usedModel = out.model;
+          if (out.source === 'local' && out.note) aiError = out.note; // 改用本機的提示
         }
         usedAI = true;
       } catch (e) {
@@ -152,19 +152,31 @@ export default function Home() {
         </button>
       </div>
 
-      <div className="engine-row">
-        {Object.entries(ENGINES).map(([key, e]) => (
-          <button
-            key={key}
-            className={'engine-btn' + (engine === key ? ' active' : '')}
-            onClick={() => setEngine(key)}
-            disabled={loading}
-          >
-            {e.label}
-          </button>
-        ))}
+      <div className="engine-toggle">
+        <button
+          className="engine-toggle-btn"
+          onClick={() => setShowEngines((v) => !v)}
+        >
+          判斷模式:<strong>{ENGINES[engine].label}</strong> {showEngines ? '▴ 收合' : '▾ 切換'}
+        </button>
       </div>
-      <div className="engine-hint">{engineHint(engine)}</div>
+      {showEngines ? (
+        <>
+          <div className="engine-row">
+            {Object.entries(ENGINES).map(([key, e]) => (
+              <button
+                key={key}
+                className={'engine-btn' + (engine === key ? ' active' : '')}
+                onClick={() => setEngine(key)}
+                disabled={loading}
+              >
+                {e.label}
+              </button>
+            ))}
+          </div>
+          <div className="engine-hint">{engineHint(engine)}</div>
+        </>
+      ) : null}
 
       <div className="header">
         <h1>
@@ -254,10 +266,10 @@ export default function Home() {
 
 function engineHint(engine) {
   if (engine === 'auto')
-    return '⚡ 自動挑選:有設定 Gemini 金鑰就用 Gemini(最準),否則用本地語意(免金鑰)。';
+    return '⚡ 自動挑選:有設定 Gemini 金鑰就用 Gemini(最準),否則用語意模式(免金鑰)。';
   if (engine === 'gemini')
     return '☁️ 用你的 Gemini 金鑰雲端判斷,最準確、附判斷理由。';
-  return '🧠 在你的瀏覽器用語意模型判斷,免金鑰。首次使用會下載模型(約 120MB,之後快取),只給相關度、無理由。';
+  return '🧠 免金鑰語意判斷:優先用雲端模型(免下載、秒開);免費額度用完會自動改用瀏覽器本機模型。只給相關度、無理由。';
 }
 
 function ApiKeyPanel({ apiKey, onSave, onClear, onClose }) {
@@ -326,7 +338,7 @@ function ApiKeyPanel({ apiKey, onSave, onClear, onClose }) {
 
 const ENGINE_BADGE = {
   gemini: '☁️ Gemini 雲端',
-  semantic: '🧠 本地語意',
+  semantic: '🧠 語意',
 };
 
 function Results({ data }) {

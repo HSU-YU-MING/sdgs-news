@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "preview": "next build && wrangler pages dev out --compatibility-date 2024-09-01",
-    "deploy": "next build && wrangler pages deploy out --commit-dirty=true",
+    "preview": "next build && wrangler pages dev",
+    "deploy": "next build && wrangler pages deploy --commit-dirty=true",
     "lint": "next lint"
   },
   "dependencies": {
