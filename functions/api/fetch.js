@@ -15,9 +15,11 @@ export async function onRequestPost(context) {
     return json({ error: '請輸入有效的網址(需以 http:// 或 https:// 開頭)' }, 400);
   }
 
-  let res;
+  // 1) 先嘗試直接抓取 + 萃取(快)
+  let title = '';
+  let text = '';
   try {
-    res = await fetch(url, {
+    const res = await fetch(url, {
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
@@ -25,25 +27,53 @@ export async function onRequestPost(context) {
       },
       redirect: 'follow',
     });
-  } catch (e) {
-    return json({ error: '無法連線到該網址:' + e.message }, 422);
+    if (res.ok) {
+      const ext = extract(await res.text());
+      title = ext.title;
+      text = ext.text;
+    }
+  } catch {
+    /* 連線失敗 → 交給下面的閱讀模式備援 */
   }
 
-  if (!res.ok) {
-    return json({ error: `抓取網頁失敗(HTTP ${res.status})` }, 422);
+  // 2) 內文太少或抓取失敗 → 改用閱讀模式(Jina Reader,會執行 JS)再抓一次
+  let readerStatus = null;
+  if (text.length < 200) {
+    const rr = await fetchViaReader(url, context.env);
+    readerStatus = rr.status;
+    if (rr.text.length > text.length) {
+      text = rr.text;
+    }
   }
-
-  const html = await res.text();
-  const { title, text } = extract(html);
 
   if (!text || text.length < 50) {
-    return json(
-      { error: '抓到網頁了,但找不到足夠的內文(該站可能需要登入或為動態載入)。請改用「貼文字」模式。' },
-      422
-    );
+    let error = '抓不到足夠的內文(該站可能需要登入、有反爬蟲、或內容無法解析)。請改用「貼文字」模式。';
+    if (readerStatus === 402 || readerStatus === 401) {
+      error = '🔋 閱讀模式(Jina)的免費額度已用完。此站為動態載入、無法直接擷取,請改用「貼文字」模式。(若要繼續用閱讀模式,可在 Cloudflare 更換 JINA_API_KEY)';
+    } else if (readerStatus === 429) {
+      error = '⏳ 閱讀模式暫時達到流量上限,請稍後再試,或改用「貼文字」模式。';
+    }
+    return json({ error, readerStatus }, 422);
   }
 
   return json({ title, text: (title ? title + '\n\n' : '') + text.slice(0, 8000) });
+}
+
+// 閱讀模式備援:透過 Jina Reader 以「真瀏覽器執行 JS」的方式取得乾淨內文。
+// 用於救回 JS 動態載入 / SPA / 部分被擋的網站。失敗就回空字串。
+// 需設定環境變數 JINA_API_KEY(免費申請);沒設定時免金鑰呼叫會因伺服器共用 IP 被限流(429),通常無效。
+async function fetchViaReader(url, env) {
+  try {
+    const headers = { 'X-Return-Format': 'text', Accept: 'text/plain' };
+    if (env && env.JINA_API_KEY) {
+      headers.Authorization = 'Bearer ' + env.JINA_API_KEY;
+    }
+    const r = await fetch('https://r.jina.ai/' + url, { headers });
+    if (!r.ok) return { text: '', status: r.status };
+    return { text: (await r.text()).trim(), status: 200 };
+  } catch {
+    return { text: '', status: 0 };
+  }
 }
 
 // 用純字串處理萃取內文(不依賴 cheerio,Workers 環境可用)。
@@ -58,35 +88,46 @@ function extract(html) {
   }
 
   // 移除雜訊區塊
-  let body = html
+  const cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
     .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
     .replace(/<header[\s\S]*?<\/header>/gi, ' ')
     .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
-    .replace(/<aside[\s\S]*?<\/aside>/gi, ' ');
+    .replace(/<aside[\s\S]*?<\/aside>/gi, ' ')
+    .replace(/<form[\s\S]*?<\/form>/gi, ' ');
 
-  // 優先抓 <article>
-  const article = body.match(/<article[\s\S]*?<\/article>/i);
-  if (article) body = article[0];
+  // 候選區塊:每個 <article> 區塊 + 整頁;各自取 <p> 內文,挑「內文最多」的那個。
+  // (避免被頁面上裝飾性的小 <article> 誤導,例如某些部落格的「閱讀文章」小區塊)
+  const candidates = [];
+  for (const m of cleaned.matchAll(/<article[\s\S]*?<\/article>/gi)) candidates.push(m[0]);
+  candidates.push(cleaned);
 
-  // 抓所有夠長的 <p>
-  const paras = [];
-  const re = /<p[^>]*>([\s\S]*?)<\/p>/gi;
-  let m;
-  while ((m = re.exec(body)) !== null) {
-    const t = decodeEntities(stripTags(m[1])).trim();
-    if (t.length > 30) paras.push(t);
+  let textOut = '';
+  for (const c of candidates) {
+    const t = paragraphs(c);
+    if (t.length > textOut.length) textOut = t;
   }
 
-  let textOut = paras.join('\n');
+  // 仍太短 → 退而求其次:整頁去標籤
   if (textOut.length < 200) {
-    // 退而求其次:整段去標籤
-    textOut = decodeEntities(stripTags(body)).replace(/\s{2,}/g, ' ').trim();
+    textOut = decodeEntities(stripTags(cleaned)).replace(/\s{2,}/g, ' ').trim();
   }
 
   return { title: title.trim(), text: textOut.trim() };
+}
+
+// 從一段 HTML 取出夠長的 <p> 段落,合併成文字
+function paragraphs(htmlChunk) {
+  const out = [];
+  const re = /<p[^>]*>([\s\S]*?)<\/p>/gi;
+  let m;
+  while ((m = re.exec(htmlChunk)) !== null) {
+    const t = decodeEntities(stripTags(m[1])).trim();
+    if (t.length > 30) out.push(t);
+  }
+  return out.join('\n');
 }
 
 function stripTags(s) {

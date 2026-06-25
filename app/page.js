@@ -92,6 +92,7 @@ export default function Home() {
       let aiError = null;
       let usedAI = false;
       let usedModel = null;
+      let info = null;
       try {
         if (effective === 'gemini') {
           const out = await classifyWithGemini(content, apiKey);
@@ -103,6 +104,9 @@ export default function Home() {
           const out = await classifySemantic(content, (p) => setProgress(p));
           ai = out.results;
           usedModel = out.model;
+          // 語意模式為概略判斷,誠實提醒使用者
+          info =
+            '語意模式為「概略」判斷:依關鍵字語意相似度推估,可能含不夠精準的項目,也無法像 Gemini 那樣避免偏差或給出理由。需要精準判斷與理由,請改用 Gemini 模式。';
           if (out.source === 'local' && out.note) aiError = out.note; // 改用本機的提示
         }
         usedAI = true;
@@ -133,7 +137,7 @@ export default function Home() {
         if (!usedAI && !aiError) aiError = '此模式未產生結果,改顯示關鍵字快篩。';
       }
 
-      setData({ results, usedAI, usedModel, aiError, sourceTitle, engine: effective, auto: engine === 'auto' });
+      setData({ results, usedAI, usedModel, aiError, info, sourceTitle, engine: effective, auto: engine === 'auto' });
     } catch (e) {
       setError('發生問題:' + e.message);
     } finally {
@@ -233,6 +237,12 @@ export default function Home() {
             onKeyDown={(e) => e.key === 'Enter' && canSubmit && analyze()}
           />
         )}
+
+        {mode === 'url' ? (
+          <div className="url-hint">
+            ℹ️ 少數網站(需登入、付費牆或動態載入)可能抓不到內文。若出現抓取失敗,請改用「貼文字」貼上標題與內文即可。
+          </div>
+        ) : null}
 
         <button className="btn" onClick={analyze} disabled={!canSubmit || loading}>
           {loading ? <span className="spinner" /> : null}
@@ -342,7 +352,7 @@ const ENGINE_BADGE = {
 };
 
 function Results({ data }) {
-  const { results, usedAI, usedModel, aiError, sourceTitle, engine, auto } = data;
+  const { results, usedAI, usedModel, aiError, info, sourceTitle, engine, auto } = data;
 
   return (
     <div className="results">
@@ -359,6 +369,7 @@ function Results({ data }) {
       </div>
 
       {sourceTitle ? <div className="source">來源標題:{sourceTitle}</div> : null}
+      {info ? <div className="info-note">ℹ️ {info}</div> : null}
       {aiError ? <div className="notice">{aiError}</div> : null}
 
       {results.length > 0 ? (

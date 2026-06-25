@@ -346,6 +346,24 @@ input:focus {
   margin-top: 32px;
 }
 
+.url-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.info-note {
+  margin-bottom: 12px;
+  background: #eef4fb;
+  border: 1px solid #cdddf0;
+  color: #2c5a86;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .results-head {
   display: flex;
   align-items: baseline;
