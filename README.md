@@ -4,13 +4,34 @@
 
 **[線上使用](https://sdgs-news.pages.dev) · [作品介紹與開發故事](https://cornhsu.com/sdgs-news.html)**
 
+![SDGs 新聞分析器的網站畫面](docs/screenshot.png)
+
+核心設計是**不綁卡就零費用**:每個用到雲端額度的地方都有上限保護,額度用完只會降級、不會扣錢。
+凡是能在瀏覽器做的判斷都留在瀏覽器裡,使用者的金鑰不經過伺服器。
+
+## 三層判斷
+
+三層之間自動切換,使用者不會遇到「請先設定 XXX」的死胡同。預設模式是「自動」:有金鑰就走 Gemini,沒有就走語意,兩者不可用時退回關鍵字。
+
+| 層 | 用什麼 | 說明 |
+|---|---|---|
+| **關鍵字快篩** | `lib/sdgs.js` | 17 項 SDG 各自維護關鍵字清單,是最終保底——所有 AI 服務都失效時仍給得出結果。免服務、免金鑰。 |
+| **語意向量** | Workers AI `@cf/baai/bge-m3`,額度用完改用瀏覽器內的 `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | 只給相關度分數、不給理由。雲端與本機兩條路徑同介面,自動切換。 |
+| **Gemini(自帶金鑰)** | `lib/geminiClient.js` | 最準的一層,會套用防偏差規則並給出判斷理由。 |
+
 ## 架構(前端為主)
 
-- **前端(靜態網站)**:介面 + 關鍵字快篩 + 直接呼叫 Gemini。
+- **前端(靜態網站)**:介面 + 關鍵字快篩 + 直接呼叫 Gemini + 本機語意模型。
   使用者的 API 金鑰只存在他自己的瀏覽器(localStorage),分析時瀏覽器**直接**打給 Google,金鑰不經過任何伺服器。30 天未使用會自動清除。
-- **`functions/api/fetch.js`**:唯一的後端,是一個 Cloudflare Pages Function,只負責「代抓新聞網頁內文」(解決瀏覽器跨域限制),完全不碰金鑰。
+- **`functions/api/fetch.js`**:代抓新聞網頁內文(解決瀏覽器跨域限制),完全不碰金鑰。
+- **`functions/api/embed.js`**:呼叫 Workers AI 算向量,並以 KV 記錄每日呼叫次數。
+  硬性上限 `DAILY_CAP = 900`(壓在免費的每天 10,000 Neurons 與 KV 每天 1,000 次寫入之內),
+  達標即回 429,前端自動改用瀏覽器本機模型——**用完不會扣錢,只會功能降級**。
 
-判斷邏輯:先用關鍵字快篩,再用 Gemini 做語意精修;若使用者沒填金鑰,自動退回只用關鍵字。
+17 項 SDG 的雲端向量是靜態內容,已預先算好存在 `lib/sdgEmbeddingsCloud.json`,
+執行時只算「這篇新聞」一個向量,再與 17 個做 cosine similarity,額度用量降到最低。
+
+更完整的技術總覽(用了哪些語言/框架/模型、為什麼這樣設計)見 [TECH.md](TECH.md)。
 
 ## 本機開發
 
@@ -48,9 +69,14 @@ npm run deploy
 
 | 檔案 | 用途 |
 | --- | --- |
-| `app/page.js` | 前端頁面 + 分析流程(關鍵字、Gemini、組合結果) |
+| `app/page.js` | 前端頁面 + 分析流程(三層判斷的切換與結果組合) |
 | `app/globals.css` | 樣式 |
-| `lib/sdgs.js` | 17 項 SDGs 資料 + 關鍵字比對 |
-| `lib/geminiClient.js` | 瀏覽器端呼叫 Gemini |
+| `lib/sdgs.js` | 17 項 SDGs 資料 + 關鍵字比對(第一層) |
+| `lib/localSemantic.js` | 語意層:雲端向量與瀏覽器本機模型的統一入口(第二層) |
+| `lib/sdgEmbeddingsCloud.json` | 預先算好的 17 個 SDG 雲端向量 |
+| `lib/geminiClient.js` | 瀏覽器端呼叫 Gemini(第三層) |
+| `lib/prompt.js` | Gemini 提示語與防偏差規則 |
 | `lib/keyStore.js` | 金鑰本機儲存 + 30 天清除 |
 | `functions/api/fetch.js` | Cloudflare Function:代抓新聞網頁 |
+| `functions/api/embed.js` | Cloudflare Function:Workers AI 向量 + KV 每日上限 |
+| `TECH.md` | 完整技術總覽 |
