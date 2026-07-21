@@ -2,7 +2,7 @@
 
 貼上一篇(大學/學校)新聞的內容或網址,自動判斷它對應到哪些聯合國永續發展目標(SDGs,共 17 項)。專為校園新聞調校,會從「教學 / 研究 / 校務營運 / 社區參與」四個面向判讀。
 
-**線上網址:** https://sdgs-news.pages.dev
+**[線上使用](https://sdgs-news.pages.dev) · [作品介紹與開發故事](https://cornhsu.com/sdgs-news.html)**
 
 ## 架構(前端為主)
 
