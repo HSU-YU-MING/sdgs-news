@@ -80,3 +80,7 @@ npm run deploy
 | `functions/api/fetch.js` | Cloudflare Function:代抓新聞網頁 |
 | `functions/api/embed.js` | Cloudflare Function:Workers AI 向量 + KV 每日上限 |
 | `TECH.md` | 完整技術總覽 |
+
+## 授權
+
+本專案程式碼以 [MIT License](LICENSE) 授權。
