@@ -91,6 +91,22 @@
 
 只要 **Cloudflare 與 Jina 都不綁信用卡**,額度用完只會「功能降級」,不會產生任何費用。
 
+## 套件安全決策（2026-08-11）
+
+**背景**：`npm audit` 報 8 個漏洞（protobufjs moderate、sharp high ×7）。
+
+**決策**：只用 `overrides` 把 protobufjs 升到 `^7.6.5`,sharp 暫不處理。
+
+**理由**：`npm audit fix` 會連帶把 `miniflare` 從 4.x 換成 `5.x-alpha`、`wrangler` 升到 4.121
+——那是本站唯一的部署工具與本機 Functions 預覽引擎,為修漏洞換成 alpha 版風險過高。
+sharp 的修補版（0.35.2）必須靠那次升級才拉得到,所以一併延後。
+
+**代價（接受的風險）**：sharp 的 4 個 libvips CVE 仍在。實際暴露面極低——本站是
+`output: 'export'` 純靜態匯出,線上沒有 Node runtime,sharp 只在**本機建置時**執行,
+且輸入圖片來自自己的 repo。
+
+**何時重看**：miniflare 5.x 脫離 alpha 後,一起升 next + wrangler + miniflare,sharp 會自然被帶上來。
+
 ## 一句話總結
 
 用 **JavaScript 一條龍**（Next.js + React 前端、Cloudflare Functions 後端）,部署在 **Cloudflare**,搭配 **Gemini、Cloudflare Workers AI、瀏覽器端 AI** 三層判斷,主打「**免金鑰也能用、自帶金鑰更準、全程不扣錢**」。
