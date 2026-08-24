@@ -18,7 +18,7 @@
 | --- | --- |
 | **Next.js 15**（App Router） | 主框架,以「靜態匯出」（`output: 'export'`）打包成純靜態網站 |
 | **React 19** | 前端介面（輸入框、模式切換、結果卡片、金鑰設定面板） |
-| **Cloudflare Pages** | 部署平台,提供免費網址 `sdgs-news.pages.dev` |
+| **Cloudflare Pages** | 部署平台。對外網址是 `sdgs.cornhsu.com`,平台原生網址 `sdgs-news.pages.dev` 仍可用 |
 | **Cloudflare Pages Functions** | 後端（Workers 執行環境）,即 `functions/` 資料夾 |
 | **Cloudflare Workers AI** | 後端免費 AI（語意向量模型 bge-m3） |
 | **Cloudflare KV** | 鍵值儲存,做「每日呼叫上限」計數器（防扣費） |
