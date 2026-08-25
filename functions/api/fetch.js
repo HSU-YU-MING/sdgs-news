@@ -2,6 +2,13 @@
 // 唯一的後端,只負責「代抓新聞網頁的內文」(解決瀏覽器跨域限制)。
 // 完全不碰使用者的 API 金鑰。純 JavaScript,可在 Cloudflare Workers 環境執行。
 
+// 每日代抓上限。這個端點沒有驗證,不加上限就是一個開放代理,
+// 也能被灌請求燒光 Jina 閱讀模式的免費額度(見 fetchViaReader)。
+// 數字要跟 KV 免費寫入額度(每天 1,000 次)一起算:embed.js 佔 900,這裡佔 100,剛好壓在預算內。
+// 正常使用量遠低於此——每次「貼網址」分析最多觸發 1 次代抓。
+const DAILY_CAP = 100;
+const MAX_URL_LEN = 2048;
+
 export async function onRequestPost(context) {
   let url = '';
   try {
@@ -11,8 +18,40 @@ export async function onRequestPost(context) {
     return json({ error: '請求格式錯誤' }, 400);
   }
 
-  if (!/^https?:\/\//i.test(url)) {
+  if (url.length > MAX_URL_LEN) {
+    return json({ error: '網址過長' }, 400);
+  }
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
     return json({ error: '請輸入有效的網址(需以 http:// 或 https:// 開頭)' }, 400);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return json({ error: '請輸入有效的網址(需以 http:// 或 https:// 開頭)' }, 400);
+  }
+  // 防禦縱深:擋內部/保留位址。Workers 平台本身連不到私有網段,
+  // 這層是避免被拿來探測與當內容代理的順手硬化,不是主要防線。
+  if (isInternalHost(parsed.hostname)) {
+    return json({ error: '不支援 IP 或內部位址,請貼新聞網站的網址' }, 400);
+  }
+
+  // ---- 每日上限檢查(若有 KV 綁定才啟用;與 embed.js 同款)----
+  // 已知取捨:先讀後寫、無原子性,並發下會少算。用「上限遠低於實際承受力」的安全邊際吸收。
+  const dayKey = 'fetch:' + new Date().toISOString().slice(0, 10); // 以 UTC 日期計
+  let count = 0;
+  if (context.env.USAGE_KV) {
+    try {
+      count = parseInt((await context.env.USAGE_KV.get(dayKey)) || '0', 10) || 0;
+    } catch {
+      count = 0; // 讀取失敗就當 0(避免整個功能掛掉)
+    }
+    if (count >= DAILY_CAP) {
+      return json(
+        { error: '⏳ 「貼網址」功能今日額度已用完。請改用「貼文字」模式——複製新聞內文貼上即可,分析功能不受影響。' },
+        429
+      );
+    }
   }
 
   // 1) 先嘗試直接抓取 + 萃取(快)
@@ -46,6 +85,15 @@ export async function onRequestPost(context) {
     }
   }
 
+  // 代抓已經做完(可能含一次 Jina 呼叫),不論結果好壞都把今日計數 +1(2 天後自動過期)
+  if (context.env.USAGE_KV) {
+    try {
+      await context.env.USAGE_KV.put(dayKey, String(count + 1), { expirationTtl: 172800 });
+    } catch {
+      /* 寫入失敗不影響本次結果 */
+    }
+  }
+
   if (!text || text.length < 50) {
     let error = '抓不到足夠的內文(該站可能需要登入、有反爬蟲、或內容無法解析)。請改用「貼文字」模式。';
     if (readerStatus === 402 || readerStatus === 401) {
@@ -57,6 +105,18 @@ export async function onRequestPost(context) {
   }
 
   return json({ title, text: (title ? title + '\n\n' : '') + text.slice(0, 8000) });
+}
+
+// 內部/保留位址判斷:localhost 與其變體、.local/.internal 網域、以及所有 IP 字面量。
+// IP 一律擋是刻意從簡——正常新聞網址都是網域名,擋掉整類就不用維護私有網段清單。
+function isInternalHost(hostname) {
+  const h = hostname.toLowerCase().replace(/\.$/, '');
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) {
+    return true;
+  }
+  if (h.startsWith('[')) return true; // IPv6 字面量(URL API 的 hostname 保留中括號)
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true; // IPv4 字面量
+  return false;
 }
 
 // 閱讀模式備援:透過 Jina Reader 以「真瀏覽器執行 JS」的方式取得乾淨內文。
