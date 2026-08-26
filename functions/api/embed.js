@@ -70,9 +70,11 @@ export async function onRequestPost(context) {
     }
 
     return json({ embeddings });
-  } catch (e) {
-    // 額度用完 / 限流 / 其他錯誤 → 429,前端自動切本機
-    return json({ error: 'ai-failed', message: String(e?.message || e).slice(0, 200) }, 429);
+  } catch {
+    // 額度用完 / 限流 / 其他錯誤 → 429,前端自動切本機。
+    // 刻意只回固定錯誤碼:Workers AI 的原始錯誤訊息可能含內部細節,
+    // 而前端只看狀態碼就切換,回傳訊息沒有人用。
+    return json({ error: 'ai-failed' }, 429);
   }
 }
 
