@@ -59,9 +59,15 @@ npm run deploy
 
 這是「使用者自帶金鑰」的網站。**請勿**在 Cloudflare 設定 `GEMINI_API_KEY` 環境變數,否則所有人會共用你的金鑰並由你付費。
 
+使用者的 Gemini 金鑰存在**他自己瀏覽器的 localStorage**,分析時由瀏覽器直接打給 Google,不經過本站伺服器。
+因此本專案**不使用 `.env` 檔,也沒有 `.env.local.example` 範本**——網站程式碼裡沒有任何一處讀 `process.env`。
+唯一的伺服器端密鑰是 `JINA_API_KEY`,設在 Cloudflare Pages Secret(見 TECH.md)。
+
 ## 調整建議
 
 - 判斷更準:在 `lib/sdgs.js` 增補各目標關鍵字。
+- ⚠ 改了 `lib/sdgs.js` 的 `SDG_DESCRIPTIONS` 或 `name`,**要重跑 `node scripts/build-sdg-embeddings.mjs`**
+  重新產生雲端向量,否則雲端與本機兩條語意路徑會悄悄不一致(用法見腳本開頭)。
 - 改 AI 規則 / 門檻:`lib/geminiClient.js`(提示語、`score >= 40`、模型 fallback 清單)。
 - 金鑰清除天數:`lib/keyStore.js` 的 `INACTIVITY_DAYS`。
 
@@ -74,6 +80,7 @@ npm run deploy
 | `lib/sdgs.js` | 17 項 SDGs 資料 + 關鍵字比對(第一層) |
 | `lib/localSemantic.js` | 語意層:雲端向量與瀏覽器本機模型的統一入口(第二層) |
 | `lib/sdgEmbeddingsCloud.json` | 預先算好的 17 個 SDG 雲端向量 |
+| `scripts/build-sdg-embeddings.mjs` | 重新產生上面那份向量(改了 SDG 描述文字就要跑) |
 | `lib/geminiClient.js` | 瀏覽器端呼叫 Gemini(第三層) |
 | `lib/prompt.js` | Gemini 提示語與防偏差規則 |
 | `lib/keyStore.js` | 金鑰本機儲存 + 30 天清除 |

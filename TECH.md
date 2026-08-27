@@ -67,6 +67,7 @@
 | `lib/prompt.js` | JS | SDG 判斷提示語（含防偏差規則） |
 | `lib/sdgs.js` | JS | 17 項 SDG 資料 + 關鍵字 + 語意描述 |
 | `lib/sdgEmbeddingsCloud.json` | JSON | 預先算好的 17 項 SDG 雲端向量（省額度） |
+| `scripts/build-sdg-embeddings.mjs` | JS | 重新產生上面那份向量；改了 `SDG_DESCRIPTIONS` 就要跑 |
 | `lib/keyStore.js` | JS | Gemini 金鑰本機儲存（30 天未用自動清除） |
 | `functions/api/fetch.js` | JS | 代抓網頁 + Jina 閱讀模式備援 |
 | `functions/api/embed.js` | JS | Workers AI 向量 + 每日上限 |
@@ -80,6 +81,13 @@
 | `GEMINI_API_KEY` | 各使用者瀏覽器（localStorage） | 使用者自帶,不在伺服器設定 |
 
 > ⚠️ 切勿在 Cloudflare 伺服器設定 `GEMINI_API_KEY`,否則所有人會共用你的金鑰並由你付費。
+
+本專案**不使用 `.env` 檔**：網站程式碼（`app/`、`lib/`、`functions/`）沒有任何一處讀 `process.env`，
+所以也刻意不放 `.env.local.example` 範本，以免讓人誤以為架構是「伺服器端共用金鑰」。
+`JINA_API_KEY` 是透過 Workers 的綁定（`env.JINA_API_KEY`）讀取，不是 `.env` 檔。
+
+唯一讀環境變數的是 `scripts/build-sdg-embeddings.mjs`（`CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`），
+那是**只在自己電腦上跑的離線工具**，不會被打包也不會上線。
 
 ## 成本與額度（重點：不綁卡就零費用）
 

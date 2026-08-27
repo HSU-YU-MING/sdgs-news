@@ -50,6 +50,10 @@ README 與 TECH.md 都寫了這條警告，**部署時看到「好像少設了�
 （`JINA_API_KEY` 是例外，那是給 `/api/fetch` 閱讀模式備援用的，設在 Cloudflare Pages Secret，
 不是 AI 判斷金鑰，額度用完只會讓「貼網址」降級成「請改貼文字」。）
 
+**這個 repo 也刻意不放 `.env` 範本**——理由見下面「地雷」那節。
+`scripts/build-sdg-embeddings.mjs` 裡的 `process.env.CLOUDFLARE_*` 不是反例：
+那是只在自己電腦上跑的離線工具，`scripts/` 不會被 `next build` 打包、線上也沒有 Node 可以跑它。
+
 ## 兩個端點的每日上限（2026-08-25／26 補上）
 
 這兩支是**沒有驗證、對全世界開放**的端點，不設上限就是一個開放代理 + 免費 AI 服務。
@@ -85,7 +89,7 @@ Workers AI 的錯誤字串可能帶模型名與額度狀態，而前端只看狀
 
 ## 地雷
 
-### `lib/sdgEmbeddingsCloud.json` 是手工產物，repo 裡沒有產生器
+### 改了 `SDG_DESCRIPTIONS` 就要重跑 `scripts/build-sdg-embeddings.mjs`
 
 17 項 SDG 的雲端向量已預先算好（`{"model":"@cf/baai/bge-m3","dim":1024}`），
 執行時只算「這篇新聞」一個向量再做 cosine similarity——這是省額度的關鍵。
@@ -93,8 +97,22 @@ Workers AI 的錯誤字串可能帶模型名與額度狀態，而前端只看狀
 ⚠ **但雲端路徑用的是這份烘焙好的 JSON，本機路徑（MiniLM）卻是每次即時重算 `sdgTexts()`。**
 所以改了 `lib/sdgs.js` 的 `SDG_DESCRIPTIONS` 或 `name`：本機路徑立刻跟上，**雲端路徑不會**，
 兩條路的判斷結果會悄悄不一致，而且**不會有任何錯誤**，只是分數變得有點怪。
-repo 裡**沒有重算腳本**（當初是用 `node -e` 一次性跑出來的），要改描述文字就得自己重跑一次
-Workers AI 產生新的 JSON。換掉 bge-m3 也一樣——`model` 欄位只是註記，程式不會驗。
+
+**所以改完 `lib/sdgs.js` 一定要回來重跑產生器**（2026-08-26 補上，在那之前是用 `node -e` 一次性跑的）：
+
+```bash
+# 沒有 API Token 的話：另開終端機跑 npm run preview，然後
+node scripts/build-sdg-embeddings.mjs --endpoint=http://localhost:8788/api/embed
+# 有 API Token（Account → Workers AI → Read）的話直接：
+CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/build-sdg-embeddings.mjs
+```
+
+`--check` 只比對不寫檔，可以用來確認「JSON 跟現在的描述文字還對得上嗎」。
+**目前的 JSON 就是這支跑出來的，所以 `--check` 應該回報誤差 0**；
+出現非 0 就代表有人改了描述卻沒重跑。
+
+腳本刻意 `import { sdgTexts }`（`lib/localSemantic.js` 已 export），不自己複製一份組字串的邏輯——
+複製就是這個 bug 的來源。換掉 bge-m3 一樣要重跑；`model` 欄位只是註記，程式不會驗。
 
 ### `npm run dev` 下的語意模式會靜默下載 120MB 模型
 
@@ -117,10 +135,27 @@ Workers AI 產生新的 JSON。換掉 bge-m3 也一樣——`model` 欄位只是
 `FALLBACK_MODELS` 只是連不到時的靜態後備。所以**「模型換代了要改程式」通常是假需求**，
 排序規則壞了才需要動 `scoreModel()`。快取只在同一個分頁的 session 內。
 
-### `.env.local` 有真的金鑰，不可 commit
+### 這個 repo 不用 `.env` 檔，`.env.local.example` 已刪除（2026-08-26）
 
-範本是 `.env.local.example`。`.gitignore` 已含 `.env*.local`。
-（但見下面「現況與文件不符」——目前程式其實沒有讀它。）
+全 repo **沒有任何一處讀 `process.env`**（`app/`、`lib/`、`functions/` 都沒有），
+唯一的例外是 `scripts/build-sdg-embeddings.mjs`，那是只在自己電腦上跑的離線工具，
+讀的是**本機 shell** 的 `CLOUDFLARE_*`，不會被打包也不會上線。
+
+原本的 `.env.local.example` 教人把 Gemini 金鑰填進 `.env.local`，
+但那把金鑰**不會被任何程式讀到**——它跟上面的「金鑰紅線」正好相反，
+留著只會讓下一個人（或 AI）以為架構是「伺服器端共用金鑰」，進而順手去 Cloudflare 設 `GEMINI_API_KEY`。
+所以直接刪掉範本，不留「改寫成警告」的版本：**檔案存在本身就是一種「請填我」的暗示**。
+
+兩把金鑰真正的位置：
+
+| 金鑰 | 放哪 | 誰讀 |
+|---|---|---|
+| `GEMINI_API_KEY` | **使用者自己瀏覽器的 localStorage** | `lib/keyStore.js` → `lib/geminiClient.js`（瀏覽器直接打給 Google） |
+| `JINA_API_KEY` | Cloudflare Pages Secret（Workers 綁定） | `functions/api/fetch.js` 的 `env.JINA_API_KEY` |
+
+⚠ 注意 `wrangler pages dev` 會把本機 `.env.local` 當成 secret 注入本機 Worker
+（啟動訊息會印 `Using secrets defined in .env.local`）。**這不代表線上有讀它**——
+線上根本沒有這個檔。看到那行不要以為「原來程式有用到」。`.gitignore` 已含 `.env*.local`。
 
 ### `.wrangler/` 是本機狀態
 
@@ -151,12 +186,6 @@ sharp 那一串會自然被帶掉。在那之前每次看到 audit 報紅，回�
 
 ## 現況與文件不符（已知，尚未處理）
 
-- **`.env.local` / `.env.local.example` 是遺留物**：全 repo 沒有任何一處讀 `process.env`
-  （已 grep 確認）。範本教人把 Gemini 金鑰填進 `.env.local`，但那把金鑰**不會被任何程式使用**——
-  純粹是一把躺在硬碟上的金鑰。要嘛刪掉範本，要嘛在範本裡註明只是備忘。動之前先問。
-- **UI 文案還留著已移除的第四種模式**：`app/page.js` 的 footer 寫「三種判斷模式：Gemini 雲端 /
-  本地語意 / **本地 LLM**」，錯誤訊息也提到「本地 LLM」，但 `ENGINES` 只剩 `auto` / `gemini` / `semantic`。
-  「本地 LLM」（需下載約 1GB）已經拿掉了，文案沒跟上。
 - **TECH.md 說 `sdgs-news.pages.dev`「仍可用」**——自 2026-08-23 起它會 301 轉到正式網址，
   嚴格說是「仍可連、但會被轉走」。
 - **TECH.md 的「套件安全決策（2026-08-11）」數字已過時**：當時是 8 個漏洞

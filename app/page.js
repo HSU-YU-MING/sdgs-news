@@ -41,13 +41,14 @@ export default function Home() {
   const hasKey = apiKey.trim().length > 0;
 
   async function analyze() {
-    // 「自動」:有金鑰用 Gemini,否則用本地語意(本地 LLM 因需 1GB 下載,不自動觸發)
+    // 「自動」:有金鑰用 Gemini,否則用語意模式
     const effective = engine === 'auto' ? (hasKey ? 'gemini' : 'semantic') : engine;
 
     // 只有明確選 Gemini 卻沒金鑰時才擋下(自動模式不會走到這)
     if (effective === 'gemini' && !hasKey) {
       setShowSettings(true);
-      setError('Gemini 模式需要金鑰。你也可以改用「自動」「本地語意」或「本地 LLM」,無需金鑰。');
+      // 這裡列的選項必須跟上面的 ENGINES 一致——別留下已經拿掉的模式。
+      setError('Gemini 模式需要金鑰。你也可以改用「⚡ 自動」或「🧠 語意(免金鑰)」,無需金鑰。');
       return;
     }
     setError('');
@@ -267,7 +268,8 @@ export default function Home() {
       {data ? <Results data={data} /> : null}
 
       <div className="footer">
-        三種判斷模式:Gemini 雲端 / 本地語意 / 本地 LLM · 共 17 項 SDGs<br />
+        {/* 這行要跟上面的 ENGINES 對得起來:使用者看到什麼,就只能選到什麼。 */}
+        兩種判斷模式:☁️ Gemini(自帶金鑰)/ 🧠 語意(免金鑰),或交給「⚡ 自動」挑 · 共 17 項 SDGs<br />
         你的 API 金鑰只儲存在這台裝置的瀏覽器,不會上傳保存;超過 {INACTIVITY_DAYS} 天未使用會自動清除。
       </div>
     </div>
