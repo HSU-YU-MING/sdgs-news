@@ -153,9 +153,17 @@ CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/build-sdg-embedd
 | `GEMINI_API_KEY` | **使用者自己瀏覽器的 localStorage** | `lib/keyStore.js` → `lib/geminiClient.js`（瀏覽器直接打給 Google） |
 | `JINA_API_KEY` | Cloudflare Pages Secret（Workers 綁定） | `functions/api/fetch.js` 的 `env.JINA_API_KEY` |
 
-⚠ 注意 `wrangler pages dev` 會把本機 `.env.local` 當成 secret 注入本機 Worker
-（啟動訊息會印 `Using secrets defined in .env.local`）。**這不代表線上有讀它**——
+⚠ `wrangler pages dev` 會把本機 `.env.local` 當成 secret 注入本機 Worker
+（啟動訊息會印 `Using secrets defined in .env.local` 並列出欄位）。**這不代表線上有讀它**——
 線上根本沒有這個檔。看到那行不要以為「原來程式有用到」。`.gitignore` 已含 `.env*.local`。
+
+**2026-08-27 收尾**：連本機那份 `.env.local` 也刪了（裡面躺著一把沒有任何程式讀的
+Gemini 金鑰，已另行撤銷）。刪之前確認過 `git log --all -S` 零命中——**從未進過版控**。
+刪完實測 `npm run preview`，綁定清單只剩 `env.USAGE_KV` 與 `env.AI` 兩個該有的，
+那行會誤導人的 secrets log 也消失了。
+
+**所以：如果你哪天在這個 repo 看到 `.env.local` 或任何 `.env` 範本，那是有人加回來的，
+不是本來就該有的。** 這個 repo 的設計是零伺服器端 AI 金鑰。
 
 ### `.wrangler/` 是本機狀態
 
